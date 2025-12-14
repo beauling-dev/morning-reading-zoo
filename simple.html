@@ -115,6 +115,10 @@
         <h1>🦁 早读动物园 🐸</h1>
         <p class="subtitle">大声朗读小动物们才会出现，快点大声朗读吧！</p>
 
+        <div id="status" style="padding: 10px; margin-bottom: 10px; background: #e0f2fe; border-radius: 5px; text-align: center; color: #0369a1;">
+            准备就绪，点击"开始监测"按钮开始
+        </div>
+
         <div class="zoo" id="zoo">
             <div class="grass"></div>
         </div>
@@ -157,6 +161,7 @@
         const thresholdValue = document.getElementById('thresholdValue');
         const timerDisplay = document.getElementById('timer');
         const startBtn = document.getElementById('startBtn');
+        const statusDiv = document.getElementById('status');
 
         thresholdSlider.addEventListener('input', (e) => {
             threshold = parseInt(e.target.value);
@@ -188,16 +193,28 @@
 
         async function startMonitoring() {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                updateStatus('正在请求麦克风权限...', 'info');
+
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                });
+
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 analyser = audioContext.createAnalyser();
                 microphone = audioContext.createMediaStreamSource(stream);
 
                 analyser.fftSize = 256;
+                analyser.smoothingTimeConstant = 0.8;
                 const bufferLength = analyser.frequencyBinCount;
                 const dataArray = new Uint8Array(bufferLength);
 
                 microphone.connect(analyser);
+
+                updateStatus('麦克风已连接，正在监测...', 'success');
 
                 timerInterval = setInterval(() => {
                     elapsedTime += 100;
@@ -208,12 +225,18 @@
                     if (!isMonitoring) return;
 
                     analyser.getByteTimeDomainData(dataArray);
+
+                    // 计算音量 - 使用改进的算法
                     let sum = 0;
                     for (let i = 0; i < bufferLength; i++) {
-                        sum += dataArray[i] * dataArray[i];
+                        // 将 0-255 转换为 -1 到 1 的范围
+                        const normalized = (dataArray[i] - 128) / 128;
+                        sum += normalized * normalized;
                     }
                     const rms = Math.sqrt(sum / bufferLength);
-                    const db = Math.round(Math.max(0, 20 * Math.log10(rms) + 100));
+
+                    // 转换为分贝 - 使用更敏感的公式
+                    const db = Math.round(Math.max(0, 20 * Math.log10(rms + 0.001) * 2 + 60));
 
                     decibelDisplay.textContent = db + ' dB';
 
@@ -231,8 +254,20 @@
                 startBtn.textContent = '暂停监测';
                 startBtn.classList.add('stop');
             } catch (err) {
-                alert('无法访问麦克风，请确保已授予权限');
-                console.error(err);
+                console.error('Error:', err);
+                if (err.name === 'NotAllowedError') {
+                    statusDiv.textContent = '错误：麦克风权限被拒绝！请点击浏览器地址栏左侧的锁图标，允许访问麦克风。';
+                    statusDiv.style.background = '#fee2e2';
+                    statusDiv.style.color = '#991b1b';
+                } else if (err.name === 'NotFoundError') {
+                    statusDiv.textContent = '错误：未找到麦克风设备！请确保已连接麦克风。';
+                    statusDiv.style.background = '#fee2e2';
+                    statusDiv.style.color = '#991b1b';
+                } else {
+                    statusDiv.textContent = `错误：${err.message}`;
+                    statusDiv.style.background = '#fee2e2';
+                    statusDiv.style.color = '#991b1b';
+                }
             }
         }
 
@@ -251,6 +286,20 @@
                 stopMonitoring();
             } else {
                 startMonitoring();
+            }
+        }
+
+        function updateStatus(message, type = 'info') {
+            statusDiv.textContent = message;
+            if (type === 'success') {
+                statusDiv.style.background = '#d1fae5';
+                statusDiv.style.color = '#065f46';
+            } else if (type === 'error') {
+                statusDiv.style.background = '#fee2e2';
+                statusDiv.style.color = '#991b1b';
+            } else {
+                statusDiv.style.background = '#e0f2fe';
+                statusDiv.style.color = '#0369a1';
             }
         }
     </script>
